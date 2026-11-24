@@ -60,6 +60,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [sun, setSun] = useState<number>(level.initialSun + bonusInitialSun);
   const [score, setScore] = useState<number>(0);
   const [streak, setStreak] = useState<number>(0);
+  const [maxCombo, setMaxCombo] = useState<number>(0);
+  const [comboToast, setComboToast] = useState<{
+    id: number;
+    combo: number;
+    title: string;
+    subtitle: string;
+    tier: 'normal' | 'combo3' | 'combo5';
+  } | null>(null);
+  const comboToastTimerRef = useRef<number | null>(null);
   const [solvedInMatch, setSolvedInMatch] = useState<number>(0);
   const [attemptedInMatch, setAttemptedInMatch] = useState<number>(0);
   const [selectedPlant, setSelectedPlant] = useState<PlantType | null>('sunflower');
@@ -83,7 +92,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [lawnmowers, setLawnmowers] = useState<boolean[]>([true, true, true, true, true]);
   const [defeatedCount, setDefeatedCount] = useState<number>(0);
   const [statusBanner, setStatusBanner] = useState<string>(
-    `【${level.unitLabel} ${level.name}】答对题目将自动触发战果，无需手动确认！`
+    `【${level.unitLabel} ${level.name}】点选上方植物卡片再轻点草坪即可种植，点击阳光与僵尸直接互动！`
   );
   const [quizContext, setQuizContext] = useState<QuizTriggerContext | null>(null);
   const clearedReportedRef = useRef(false);
@@ -110,8 +119,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     return () => {
       soundEngine.stopBgm();
       soundEngine.stopSpeech();
+      if (comboToastTimerRef.current !== null) {
+        window.clearTimeout(comboToastTimerRef.current);
+      }
     };
   }, []);
+
+  const showComboCelebration = useCallback(
+    (combo: number, title: string, subtitle: string, tier: 'normal' | 'combo3' | 'combo5') => {
+      if (comboToastTimerRef.current !== null) {
+        window.clearTimeout(comboToastTimerRef.current);
+      }
+      setComboToast({ id: Date.now(), combo, title, subtitle, tier });
+      comboToastTimerRef.current = window.setTimeout(() => {
+        setComboToast(null);
+      }, 2400);
+    },
+    []
+  );
 
   const stateRef = useRef({
     plants: [] as PlantInstance[],
@@ -187,6 +212,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setSun(level.initialSun + bonusInitialSun);
     setScore(0);
     setStreak(0);
+    setMaxCombo(0);
+    setComboToast(null);
     setSolvedInMatch(0);
     setAttemptedInMatch(0);
     setDefeatedCount(0);
@@ -194,7 +221,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setSelectedPlant('sunflower');
     setShovelActive(false);
     setQuizContext(null);
-    setStatusBanner(`【${level.unitLabel} ${level.name}】答对题目将自动触发战果，无需手动确认！`);
+    setStatusBanner(`【${level.unitLabel} ${level.name}】点选上方植物卡片再轻点草坪即可种植，点击阳光与僵尸直接互动！`);
     setGameState('PLAYING');
   }, [bonusInitialSun, level]);
 
@@ -294,7 +321,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       }
 
       const curStreak = streakRef.current;
-      const resonanceMultiplier = curStreak >= 4 ? 1.4 : curStreak >= 2 ? 1.2 : 1;
+      const resonanceMultiplier = curStreak >= 5 ? 1.4 : curStreak >= 3 ? 1.25 : curStreak >= 2 ? 1.15 : 1;
 
       (Object.keys(s.cooldowns) as PlantType[]).forEach((pt) => {
         if (s.cooldowns[pt] > 0) {
@@ -582,62 +609,83 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     []
   );
 
-  const handleCellClick = (row: number, col: number) => {
-    soundEngine.unlock();
-    if (gameState !== 'PLAYING' || quizContext) return;
-    const s = stateRef.current;
-    const existing = s.plants.find((p) => p.row === row && p.col === col);
+  const handleCellClick = useCallback(
+    (row: number, col: number) => {
+      soundEngine.unlock();
+      if (gameState !== 'PLAYING' || quizContext) return;
+      const s = stateRef.current;
+      const existing = s.plants.find((p) => p.row === row && p.col === col);
 
-    if (shovelActive) {
+      if (shovelActive) {
+        if (existing) {
+          s.plants = s.plants.filter((p) => p.id !== existing.id);
+          setPlants([...s.plants]);
+          setShovelActive(false);
+          setStatusBanner(`已铲除 ${PLANTS[existing.type].name}，可重新布阵。`);
+        } else {
+          setShovelActive(false);
+          setStatusBanner('已收起铲子，可继续点选植物种植。');
+        }
+        return;
+      }
+
       if (existing) {
-        s.plants = s.plants.filter((p) => p.id !== existing.id);
-        setPlants([...s.plants]);
-        setShovelActive(false);
-        setStatusBanner(`已铲除 ${PLANTS[existing.type].name}，可重新布阵。`);
+        if (existing.type !== 'cherrybomb') {
+          triggerPlantInteractionQuiz(existing);
+        }
+        return;
       }
-      return;
-    }
 
-    if (existing) {
-      if (existing.type !== 'cherrybomb') {
-        triggerPlantInteractionQuiz(existing);
+      if (!selectedPlant) return;
+      const spec = PLANTS[selectedPlant];
+      if (sun < spec.cost) {
+        setStatusBanner('阳光不足！轻点草坪阳光收集，或点击喊题僵尸直接击毙赚 +25 阳光！');
+        return;
       }
-      return;
-    }
+      if (s.cooldowns[selectedPlant] > 0) {
+        setStatusBanner(`${spec.name} 正在冷却中，请稍等片刻。`);
+        return;
+      }
 
-    if (!selectedPlant) return;
-    const spec = PLANTS[selectedPlant];
-    if (sun < spec.cost) {
-      setStatusBanner('阳光不足！等待自动阳光题弹出，或点击僵尸喊出的题目直接击毙赚 +25 阳光！');
-      return;
-    }
-    if (s.cooldowns[selectedPlant] > 0) {
-      setStatusBanner(`${spec.name} 正在冷却中，请稍等片刻。`);
-      return;
-    }
+      if (studyMode === 'quiz_plant' && spec.cost >= 100) {
+        const q = pickChapterQuestion();
+        setQuizContext({
+          purpose: 'plant_unlock',
+          pendingPlant: { type: selectedPlant, row, col },
+          question: q,
+          rewardText: `成功种植 ${spec.name} 并返还 25 阳光`,
+        });
+        return;
+      }
 
-    if (studyMode === 'quiz_plant' && spec.cost >= 100) {
-      const q = pickChapterQuestion();
-      setQuizContext({
-        purpose: 'plant_unlock',
-        pendingPlant: { type: selectedPlant, row, col },
-        question: q,
-        rewardText: `成功种植 ${spec.name} 并返还 25 阳光`,
-      });
-      return;
-    }
+      placePlantOnCell(selectedPlant, row, col);
+    },
+    [
+      gameState,
+      pickChapterQuestion,
+      placePlantOnCell,
+      quizContext,
+      selectedPlant,
+      shovelActive,
+      studyMode,
+      sun,
+      triggerPlantInteractionQuiz,
+    ]
+  );
 
-    placePlantOnCell(selectedPlant, row, col);
-  };
-
-  const handleCollectSun = (orb: SunOrb) => {
-    soundEngine.unlock();
-    if (gameState !== 'PLAYING' || quizContext) return;
-    stateRef.current.sunOrbs = stateRef.current.sunOrbs.filter((o) => o.id !== orb.id);
-    setSunOrbs([...stateRef.current.sunOrbs]);
-    soundEngine.playSun();
-    setSun((prev) => prev + orb.value);
-  };
+  const handleCollectSun = useCallback(
+    (orb: SunOrb) => {
+      soundEngine.unlock();
+      if (gameState !== 'PLAYING' || quizContext) return;
+      const exists = stateRef.current.sunOrbs.some((o) => o.id === orb.id);
+      if (!exists) return;
+      stateRef.current.sunOrbs = stateRef.current.sunOrbs.filter((o) => o.id !== orb.id);
+      setSunOrbs([...stateRef.current.sunOrbs]);
+      soundEngine.playSun();
+      setSun((prev) => prev + orb.value);
+    },
+    [gameState, quizContext]
+  );
 
   const handleQuizComplete = useCallback(
     (correct: boolean) => {
@@ -655,11 +703,46 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
       const nextStreak = streak + 1;
       setStreak(nextStreak);
+      setMaxCombo((prev) => Math.max(prev, nextStreak));
       setSolvedInMatch((prev) => prev + 1);
       onSolvedQuestion(ctx.question, nextStreak);
 
-      const streakBonus = nextStreak >= 3 ? 25 : 0;
+      const isCombo5 = nextStreak >= 5 && nextStreak % 5 === 0;
+      const isCombo3 = nextStreak === 3;
+      const streakBonus = nextStreak >= 5 ? 50 : nextStreak >= 3 ? 25 : 0;
+      const comboScoreBonus = nextStreak >= 5 ? 40 : nextStreak >= 3 ? 20 : 0;
       const s = stateRef.current;
+
+      if (isCombo5) {
+        s.zombies.forEach((z) => {
+          z.slowUntilMs = Math.max(z.slowUntilMs, s.simTimeMs + 2500);
+        });
+        setZombies([...s.zombies]);
+        showComboCelebration(
+          nextStreak,
+          `Combo x${nextStreak} 五连超神！`,
+          '全队火力 +40% · 额外 +50 阳光 · 全场僵尸冰缓 2.5 秒',
+          'combo5'
+        );
+      } else if (isCombo3) {
+        showComboCelebration(
+          nextStreak,
+          'Combo x3 三连节奏！',
+          '全队火力 +25% · 额外奖励 +25 阳光',
+          'combo3'
+        );
+      } else if (nextStreak >= 2) {
+        showComboCelebration(
+          nextStreak,
+          `Combo x${nextStreak} 连击`,
+          nextStreak >= 5
+            ? '全队火力 +40% 持续生效'
+            : nextStreak >= 3
+              ? '全队火力 +25% 持续生效'
+              : '全队火力 +15% 已激活',
+          'normal'
+        );
+      }
 
       if (ctx.purpose === 'zombie_shout' && ctx.targetZombieId) {
         const targetZ = s.zombies.find((z) => z.id === ctx.targetZombieId);
@@ -679,19 +762,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             targetZ.x = Math.min(8.8, targetZ.x + 1.1);
             targetZ.slowUntilMs = s.simTimeMs + 4000;
             targetZ.shoutQuestion = pickChapterQuestion();
-            setSun((prev) => prev + 30);
-            setStatusBanner('答对 Boss 喊题！对单元 Boss 造成 340 点重创并击退（+30 阳光）！');
+            setSun((prev) => prev + 30 + streakBonus);
+            setScore((prev) => {
+              const next = prev + 30 + comboScoreBonus;
+              s.score = next;
+              return next;
+            });
+            setStatusBanner(
+              streakBonus > 0
+                ? `Combo x${nextStreak} 重创单元 Boss！额外获得 +${streakBonus} 连击阳光！`
+                : '答对 Boss 喊题！对单元 Boss 造成 340 点重创并击退（+30 阳光）！'
+            );
           } else {
             targetZ.hp = 0;
             s.zombies = s.zombies.filter((z) => z.id !== targetZ.id);
             s.defeatedCount += 1;
-            const gainScore = ZOMBIES[targetZ.type].rewardScore + 25;
+            const gainScore = ZOMBIES[targetZ.type].rewardScore + 25 + comboScoreBonus;
             s.score += gainScore;
             setZombies([...s.zombies]);
             setDefeatedCount(s.defeatedCount);
             setScore(s.score);
-            setSun((prev) => prev + 25);
-            setStatusBanner(`精准回应喊题！已自动击毙「${ZOMBIES[targetZ.type].name}」，奖励 +25 阳光！`);
+            setSun((prev) => prev + 25 + streakBonus);
+            setStatusBanner(
+              streakBonus > 0
+                ? `Combo x${nextStreak} 精准击毙「${ZOMBIES[targetZ.type].name}」！共获得 +${25 + streakBonus} 阳光！`
+                : `精准回应喊题！已自动击毙「${ZOMBIES[targetZ.type].name}」，奖励 +25 阳光！`
+            );
 
             if (s.spawnedCount >= level.zombieCount && s.zombies.length === 0) {
               soundEngine.playVictory();
@@ -722,9 +818,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               z.slowUntilMs = s.simTimeMs + 3000;
             }
           });
+          if (streakBonus > 0) setSun((prev) => prev + streakBonus);
           setPlants([...s.plants]);
           setZombies([...s.zombies]);
-          setStatusBanner(`紧急救援成功！${PLANTS[targetP.type].name}已满血复活并震退面前僵尸！`);
+          setStatusBanner(
+            streakBonus > 0
+              ? `Combo x${nextStreak} 紧急救援！${PLANTS[targetP.type].name}满血复活并额外奖励 +${streakBonus} 阳光！`
+              : `紧急救援成功！${PLANTS[targetP.type].name}已满血复活并震退面前僵尸！`
+          );
         }
         return;
       }
@@ -745,6 +846,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               }
             });
           }
+          if (streakBonus > 0) setSun((prev) => prev + streakBonus);
           setPlants([...s.plants]);
           setStatusBanner(`进化成功！${PLANTS[targetP.type].name}已解锁高阶形态：${PLANTS[targetP.type].evolveEffect}`);
         }
@@ -755,13 +857,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         const gain = 100 + streakBonus;
         setSun((prev) => prev + gain);
         setScore((prev) => {
-          const next = prev + 30 + (nextStreak >= 3 ? 15 : 0);
+          const next = prev + 30 + comboScoreBonus;
           s.score = next;
           return next;
         });
         setStatusBanner(
           streakBonus > 0
-            ? `连对 ${nextStreak} 题（共鸣加成生效）！已自动领取 +${gain} 阳光！`
+            ? `Combo x${nextStreak} 连击加成生效！已自动领取 +${gain} 阳光！`
             : '回答正确！已自动领取 +100 阳光补给！'
         );
         return;
@@ -791,6 +893,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             target.maxHp = 1700;
             target.hp = 1700;
             target.boostUntilMs = s.simTimeMs + 8000;
+            if (streakBonus > 0) setSun((prev) => prev + streakBonus);
             setStatusBanner('坚果墙觉醒！生命值已回满并获得额外钢甲护盾！');
           } else if (target.type === 'snowpea') {
             target.boostUntilMs = s.simTimeMs + 6000;
@@ -800,9 +903,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 z.hp -= 45;
               }
             });
+            if (streakBonus > 0) setSun((prev) => prev + streakBonus);
             setStatusBanner('寒冰射手觉醒！全排僵尸被深度冰冻并开启极速射击！');
           } else if (target.type === 'peashooter') {
             target.boostUntilMs = s.simTimeMs + 6000;
+            if (streakBonus > 0) setSun((prev) => prev + streakBonus);
             setStatusBanner('豌豆射手觉醒！开启 6 秒极速连发火力压制！');
           }
           setPlants([...s.plants]);
@@ -818,6 +923,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       pickChapterQuestion,
       placePlantOnCell,
       quizContext,
+      showComboCelebration,
       streak,
       sun,
     ]
@@ -835,7 +941,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     return Math.round((solvedInMatch / attemptedInMatch) * 100);
   }, [attemptedInMatch, solvedInMatch]);
 
-  const resonanceLabel = streak >= 4 ? '共鸣 Lv.2 (+40%火力)' : streak >= 2 ? '共鸣 Lv.1 (+20%火力)' : '共鸣 Lv.0';
+  const resonanceLabel =
+    streak >= 5
+      ? `Combo x${streak} · 超神 +40%火力`
+      : streak >= 3
+        ? `Combo x${streak} · 三连 +25%火力`
+        : streak >= 2
+          ? `Combo x${streak} · 连击 +15%火力`
+          : 'Combo x0';
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -877,7 +990,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               击退 {defeatedCount} / {level.zombieCount}
             </span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono-num font-semibold text-emerald-700">{resonanceLabel}</span>
+            <span
+              className={`font-mono-num font-bold ${
+                streak >= 5 ? 'text-red-600' : streak >= 3 ? 'text-amber-600' : 'text-emerald-700'
+              }`}
+            >
+              {resonanceLabel}
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -900,7 +1019,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                   if (frontmost) triggerZombieShoutQuiz(frontmost);
                 }}
                 disabled={gameState !== 'PLAYING'}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-lg bg-sky-700 hover:bg-sky-800 active:scale-[0.98] text-white text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
               >
                 <MessageSquareWarning className="w-3.5 h-3.5" />
                 <span>答僵尸喊题击毙 ({shoutingZombies.length})</span>
@@ -912,7 +1031,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onClick={toggleBgm}
               aria-label={bgmEnabled ? '关闭背景音乐' : '开启背景音乐'}
               title={bgmEnabled ? '关闭背景音乐' : '开启背景音乐'}
-              className={`inline-flex items-center gap-1 px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-1 px-2.5 py-2 min-h-[44px] rounded-lg border text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 bgmEnabled && soundEnabled
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                   : 'border-slate-200 text-slate-500 hover:bg-slate-50'
@@ -927,7 +1046,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onClick={toggleSound}
               aria-label={soundEnabled ? '全部静音' : '开启声音'}
               title={soundEnabled ? '全部静音' : '开启声音'}
-              className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
+              className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
             >
               {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
             </button>
@@ -937,7 +1056,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onClick={() =>
                 setGameState((prev) => (prev === 'PLAYING' ? 'PAUSED' : prev === 'PAUSED' ? 'PLAYING' : prev))
               }
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-2 min-h-[44px] rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {gameState === 'PAUSED' ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
               <span>{gameState === 'PAUSED' ? '继续' : '暂停'}</span>
@@ -946,19 +1065,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             <button
               type="button"
               onClick={onExitToLobby}
-              className="px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="px-3 py-2 min-h-[44px] rounded-lg border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               换章节
             </button>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-slate-100">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-2.5 pt-2 border-t border-slate-100 overflow-x-auto pb-1">
+          <div className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 shrink-0 min-h-[52px]">
             <Sun className="w-5 h-5 text-amber-600" />
             <div>
               <div className="text-[11px] text-amber-800 font-medium leading-none">当前阳光</div>
-              <div className="text-lg font-extrabold text-amber-950 font-mono-num leading-tight">{sun}</div>
+              <div className="text-base sm:text-lg font-extrabold text-amber-950 font-mono-num leading-tight">{sun}</div>
             </div>
           </div>
 
@@ -978,7 +1097,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                   setShovelActive(false);
                   setSelectedPlant(type);
                 }}
-                className={`relative overflow-hidden flex items-center gap-2.5 px-3 py-2 rounded-xl border text-left transition-all min-h-[52px] cursor-pointer ${
+                className={`relative overflow-hidden flex items-center gap-2 sm:gap-2.5 px-3 py-2 rounded-xl border text-left transition-all min-h-[54px] shrink-0 active:scale-95 cursor-pointer ${
                   isSelected
                     ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-500/20'
                     : canAfford && cd === 0
@@ -1038,24 +1157,24 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         </span>
       </div>
 
-      {/* Main 5x9 Lawn Arena */}
+      {/* Main 5x9 Lawn Arena — Direct iPad-style Touch Controls */}
       <div className="relative w-full rounded-2xl overflow-hidden border-2 border-emerald-950/30 shadow-lg bg-[#14532D] select-none">
         <div className="flex">
-          <div className="w-12 sm:w-14 shrink-0 bg-[#57534E] border-r-2 border-stone-700 grid grid-rows-5">
+          <div className="w-9 sm:w-14 shrink-0 bg-[#57534E] border-r-2 border-stone-700 grid grid-rows-5">
             {lawnmowers.map((hasMower, rIdx) => (
               <div
                 key={rIdx}
-                className="h-24 sm:h-28 flex items-center justify-center border-b border-stone-600/40 last:border-b-0"
+                className="h-16 sm:h-24 md:h-28 flex items-center justify-center border-b border-stone-600/40 last:border-b-0"
               >
                 {hasMower ? (
                   <div
                     title={`第 ${rIdx + 1} 路小推车最后防线`}
-                    className="w-8 h-6 rounded-md bg-red-600 border border-red-900 flex items-center justify-center text-[10px] font-bold text-white shadow-sm"
+                    className="w-6 sm:w-8 h-5 sm:h-6 rounded-md bg-red-600 border border-red-900 flex items-center justify-center text-[9px] sm:text-[10px] font-bold text-white shadow-sm"
                   >
                     车
                   </div>
                 ) : (
-                  <span className="text-[10px] text-stone-400">已用</span>
+                  <span className="text-[9px] sm:text-[10px] text-stone-400">已用</span>
                 )}
               </div>
             ))}
@@ -1063,7 +1182,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
           <div className="relative flex-1 grid grid-rows-5">
             {Array.from({ length: ROWS }).map((_, rIdx) => (
-              <div key={rIdx} className="grid grid-cols-9 h-24 sm:h-28">
+              <div key={rIdx} className="grid grid-cols-9 h-16 sm:h-24 md:h-28">
                 {Array.from({ length: COLS }).map((__, cIdx) => {
                   const isDark = (rIdx + cIdx) % 2 === 0;
                   const plant = plants.find((p) => p.row === rIdx && p.col === cIdx);
@@ -1079,7 +1198,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                       type="button"
                       onClick={() => handleCellClick(rIdx, cIdx)}
                       aria-label={`草坪第${rIdx + 1}行第${cIdx + 1}列`}
-                      className={`relative flex items-center justify-center border border-emerald-950/10 transition-colors cursor-pointer ${
+                      className={`relative flex items-center justify-center border border-emerald-950/10 transition-all active:brightness-125 cursor-pointer ${
                         isDark ? 'bg-[#15803D]' : 'bg-[#16A34A]'
                       } hover:brightness-110`}
                     >
@@ -1090,27 +1209,27 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                             boosted={isBoosted}
                             evolvedLevel={plant.evolvedLevel}
                             hpRatio={plant.hp / plant.maxHp}
-                            className="w-11 h-11 sm:w-14 sm:h-14"
+                            className="w-8 h-8 sm:w-12 sm:h-14"
                           />
                           {isDanger ? (
-                            <span className="absolute -top-2.5 px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold leading-none animate-pulse">
-                              点击救援
+                            <span className="absolute -top-2 px-1 py-0.5 rounded bg-red-600 text-white text-[8px] sm:text-[9px] font-bold leading-none animate-pulse whitespace-nowrap">
+                              救援
                             </span>
                           ) : canEvolve ? (
-                            <span className="absolute -top-2.5 px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-bold leading-none">
-                              点我进化
+                            <span className="absolute -top-2 px-1 py-0.5 rounded bg-amber-400 text-slate-950 text-[8px] sm:text-[9px] font-bold leading-none whitespace-nowrap">
+                              进化
                             </span>
                           ) : isBoosted ? (
-                            <span className="absolute -top-2.5 px-1.5 py-0.5 rounded bg-emerald-300 text-slate-950 text-[9px] font-bold leading-none">
-                              连发觉醒
+                            <span className="absolute -top-2 px-1 py-0.5 rounded bg-emerald-300 text-slate-950 text-[8px] sm:text-[9px] font-bold leading-none whitespace-nowrap">
+                              觉醒
                             </span>
                           ) : plant.evolvedLevel > 0 ? (
-                            <span className="absolute -top-2.5 px-1 py-0.5 rounded bg-slate-900/75 text-amber-300 text-[9px] font-bold leading-none">
-                              双倍阶
+                            <span className="absolute -top-2 px-1 py-0.5 rounded bg-slate-900/75 text-amber-300 text-[8px] sm:text-[9px] font-bold leading-none whitespace-nowrap">
+                              双倍
                             </span>
                           ) : null}
 
-                          <div className="flex flex-col gap-0.5 mt-0.5 w-10">
+                          <div className="flex flex-col gap-0.5 mt-0.5 w-7 sm:w-10">
                             {plant.hp < plant.maxHp && (
                               <div className="w-full h-1 bg-slate-900/50 rounded-full overflow-hidden">
                                 <div
@@ -1146,7 +1265,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 }}
               >
                 <div
-                  className={`w-4 h-4 rounded-full border shadow-sm ${
+                  className={`w-2.5 h-2.5 sm:w-4 sm:h-4 rounded-full border shadow-sm ${
                     proj.isFrozen
                       ? 'bg-sky-300 border-sky-700'
                       : proj.isResonant
@@ -1162,8 +1281,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               const isHit = z.hitFlashUntilMs > stateRef.current.simTimeMs;
               const shoutPreview = z.shoutQuestion
                 ? `[${SUBJECT_LABELS[z.shoutQuestion.subject].slice(0, 2)}] ${
-                    z.shoutQuestion.prompt.length > 12
-                      ? `${z.shoutQuestion.prompt.slice(0, 12)}…`
+                    z.shoutQuestion.prompt.length > 10
+                      ? `${z.shoutQuestion.prompt.slice(0, 10)}…`
                       : z.shoutQuestion.prompt
                   }`
                 : null;
@@ -1172,9 +1291,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 <button
                   key={z.id}
                   type="button"
-                  onClick={() => triggerZombieShoutQuiz(z)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerZombieShoutQuiz(z);
+                  }}
                   title={z.shoutQuestion ? `僵尸喊题：${z.shoutQuestion.prompt}（点击作答直接击毙）` : '点击答题狙击僵尸'}
-                  className={`group absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer transition-opacity z-10 ${
+                  className={`group absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer transition-all active:scale-95 z-10 min-w-[44px] min-h-[44px] justify-center ${
                     isHit ? 'opacity-75' : 'opacity-100'
                   }`}
                   style={{
@@ -1183,11 +1305,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                   }}
                 >
                   {shoutPreview && (
-                    <div className="mb-1 max-w-[140px] sm:max-w-[165px] px-2 py-1 rounded-lg bg-white border border-slate-900/30 shadow-md text-[10px] font-bold text-slate-900 leading-tight truncate group-hover:bg-amber-300 group-hover:border-amber-700 transition-colors">
+                    <div className="mb-0.5 sm:mb-1 max-w-[82px] sm:max-w-[165px] px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md sm:rounded-lg bg-white border border-slate-900/30 shadow-md text-[8px] sm:text-[10px] font-bold text-slate-900 leading-tight truncate group-hover:bg-amber-300 group-hover:border-amber-700 transition-colors">
                       {shoutPreview}
                     </div>
                   )}
-                  <div className="w-10 h-1.5 bg-slate-900/55 rounded-full overflow-hidden mb-0.5">
+                  <div className="w-7 sm:w-10 h-1 sm:h-1.5 bg-slate-900/55 rounded-full overflow-hidden mb-0.5">
                     <div
                       className={`h-full ${isFrozen ? 'bg-cyan-300' : 'bg-red-500'}`}
                       style={{ width: `${Math.max(0, (z.hp / z.maxHp) * 100)}%` }}
@@ -1197,7 +1319,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     type={z.type}
                     frozen={isFrozen}
                     hasKnowledgeShield={Boolean(z.shoutQuestion)}
-                    className="w-12 h-14 sm:w-14 sm:h-16"
+                    className="w-9 h-11 sm:w-14 sm:h-16"
                   />
                 </button>
               );
@@ -1228,24 +1350,53 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               <button
                 key={orb.id}
                 type="button"
-                onClick={() => handleCollectSun(orb)}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  handleCollectSun(orb);
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleCollectSun(orb);
+                }}
                 title="点击收集阳光"
-                className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full flex flex-col items-center justify-center shadow-lg transition-transform hover:scale-110 cursor-pointer animate-sun-float z-20 ${
+                className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full flex flex-col items-center justify-center shadow-lg transition-transform hover:scale-110 active:scale-90 cursor-pointer animate-sun-float z-20 ${
                   orb.value >= 50
-                    ? 'w-12 h-12 bg-amber-300 border-2 border-amber-600 text-amber-950'
-                    : 'w-11 h-11 bg-yellow-300 border-2 border-amber-600 text-amber-950'
+                    ? 'w-12 h-12 sm:w-14 sm:h-14 bg-amber-300 border-2 border-amber-600 text-amber-950'
+                    : 'w-11 h-11 sm:w-13 sm:h-13 bg-yellow-300 border-2 border-amber-600 text-amber-950'
                 }`}
                 style={{
                   left: `${orb.xPercent}%`,
                   top: `${orb.yPercent}%`,
                 }}
               >
-                <Sun className="w-5 h-5 text-amber-700" />
-                {orb.value >= 50 && <span className="text-[9px] font-bold leading-none">50</span>}
+                <Sun className="w-5 h-5 sm:w-6 sm:h-6 text-amber-700" />
+                {orb.value >= 50 && <span className="text-[9px] sm:text-[10px] font-bold leading-none">50</span>}
               </button>
             ))}
           </div>
         </div>
+
+        {comboToast && (
+          <div
+            key={comboToast.id}
+            className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-25 animate-combo-pop"
+          >
+            <div
+              className={`px-5 py-2.5 rounded-2xl border-2 shadow-xl text-center backdrop-blur-sm ${
+                comboToast.tier === 'combo5'
+                  ? 'bg-amber-400/95 border-red-600 text-slate-950'
+                  : comboToast.tier === 'combo3'
+                    ? 'bg-emerald-500/95 border-amber-300 text-white'
+                    : 'bg-slate-900/90 border-emerald-400 text-white'
+              }`}
+            >
+              <div className="text-sm sm:text-base font-extrabold tracking-tight font-mono-num">
+                {comboToast.title}
+              </div>
+              <div className="text-[11px] font-medium opacity-95">{comboToast.subtitle}</div>
+            </div>
+          </div>
+        )}
 
         {gameState === 'PAUSED' && !quizContext && (
           <div className="absolute inset-0 z-30 bg-slate-950/60 backdrop-blur-[2px] flex items-center justify-center p-4">
@@ -1294,7 +1445,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 py-3 border-y border-slate-100">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-3 border-y border-slate-100">
                 <div>
                   <div className="text-xs text-slate-500">本局总分</div>
                   <div className="text-lg font-bold text-slate-900 font-mono-num">{score}</div>
@@ -1308,6 +1459,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 <div>
                   <div className="text-xs text-slate-500">答题正确率</div>
                   <div className="text-lg font-bold text-amber-700 font-mono-num">{accuracyPct}%</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">最高连击</div>
+                  <div className="text-lg font-bold text-red-600 font-mono-num">{maxCombo} Combo</div>
                 </div>
               </div>
 

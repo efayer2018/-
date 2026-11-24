@@ -69,6 +69,7 @@ export default function App() {
   });
 
   const [practiceContext, setPracticeContext] = useState<QuizTriggerContext | null>(null);
+  const [practiceStreak, setPracticeStreak] = useState<number>(0);
 
   useEffect(() => {
     try {
@@ -128,11 +129,12 @@ export default function App() {
   };
 
   const handleSolvedQuestion = (_question: Question, currentStreak: number) => {
+    const comboPoints = currentStreak >= 5 ? 35 : currentStreak >= 3 ? 15 : 0;
     setProgress((prev) => ({
       ...prev,
       totalAttempted: prev.totalAttempted + 1,
       totalSolved: prev.totalSolved + 1,
-      totalPoints: prev.totalPoints + 25 + (currentStreak >= 3 ? 15 : 0),
+      totalPoints: prev.totalPoints + 25 + comboPoints,
       bestStreak: Math.max(prev.bestStreak, currentStreak),
     }));
   };
@@ -164,15 +166,20 @@ export default function App() {
     const qId = practiceContext.question.id;
     setPracticeContext(null);
     if (correct) {
+      const nextStreak = practiceStreak + 1;
+      setPracticeStreak(nextStreak);
+      const comboBonus = nextStreak >= 5 ? 30 : nextStreak >= 3 ? 15 : 0;
       setMistakes((prev) => prev.filter((m) => m.questionId !== qId));
       setProgress((prev) => ({
         ...prev,
         mistakesCleared: prev.mistakesCleared + 1,
         totalSolved: prev.totalSolved + 1,
         totalAttempted: prev.totalAttempted + 1,
-        totalPoints: prev.totalPoints + 40,
+        totalPoints: prev.totalPoints + 40 + comboBonus,
+        bestStreak: Math.max(prev.bestStreak, nextStreak),
       }));
     } else {
+      setPracticeStreak(0);
       handleRecordMistake(practiceContext.question);
     }
   };
@@ -180,12 +187,16 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-[#F6F5F0] text-slate-900">
       {/* Strict 3-Zone Top Bar Contract */}
-      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-sm border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-6 py-3.5 flex items-center justify-between gap-8">
+      <header
+        className={`${
+          view === 'game' ? 'md:sticky static' : 'sticky top-0'
+        } z-40 bg-white/95 backdrop-blur-sm border-b border-slate-200`}
+      >
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-6">
           <button
             type="button"
             onClick={() => setView('lobby')}
-            className="text-lg font-extrabold tracking-tight text-emerald-900 whitespace-nowrap shrink-0 cursor-pointer"
+            className="text-lg font-extrabold tracking-tight text-emerald-900 whitespace-nowrap shrink-0 min-h-[44px] flex items-center cursor-pointer"
           >
             知识保卫战
           </button>
@@ -233,24 +244,48 @@ export default function App() {
             <button
               type="button"
               onClick={enterGame}
-              className="px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="px-4 py-2 min-h-[44px] text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 active:scale-[0.98] rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer"
             >
               {view === 'game' ? '正在守卫中' : '开始守卫'}
             </button>
           </div>
         </div>
 
-        <div className="flex md:hidden items-center gap-4 px-6 pb-2.5 overflow-x-auto text-xs font-medium text-slate-600">
-          <button type="button" onClick={() => setView('lobby')} className="whitespace-nowrap shrink-0">
+        <div className="flex md:hidden items-center gap-2 px-4 pb-2 overflow-x-auto text-xs font-medium text-slate-600">
+          <button
+            type="button"
+            onClick={() => setView('lobby')}
+            className={`whitespace-nowrap shrink-0 min-h-[44px] px-2.5 flex items-center rounded-lg ${
+              view === 'lobby' ? 'text-emerald-800 font-bold bg-emerald-50' : ''
+            }`}
+          >
             章节融合选关
           </button>
-          <button type="button" onClick={() => setView('mistakes')} className="whitespace-nowrap shrink-0">
+          <button
+            type="button"
+            onClick={() => setView('mistakes')}
+            className={`whitespace-nowrap shrink-0 min-h-[44px] px-2.5 flex items-center rounded-lg ${
+              view === 'mistakes' ? 'text-emerald-800 font-bold bg-emerald-50' : ''
+            }`}
+          >
             错题本 ({mistakes.length})
           </button>
-          <button type="button" onClick={() => setView('almanac')} className="whitespace-nowrap shrink-0">
+          <button
+            type="button"
+            onClick={() => setView('almanac')}
+            className={`whitespace-nowrap shrink-0 min-h-[44px] px-2.5 flex items-center rounded-lg ${
+              view === 'almanac' ? 'text-emerald-800 font-bold bg-emerald-50' : ''
+            }`}
+          >
             图鉴与成就
           </button>
-          <button type="button" onClick={() => setView('guide')} className="whitespace-nowrap shrink-0">
+          <button
+            type="button"
+            onClick={() => setView('guide')}
+            className={`whitespace-nowrap shrink-0 min-h-[44px] px-2.5 flex items-center rounded-lg ${
+              view === 'guide' ? 'text-emerald-800 font-bold bg-emerald-50' : ''
+            }`}
+          >
             章节题库室
           </button>
         </div>
@@ -498,7 +533,7 @@ export default function App() {
       </main>
 
       {practiceContext && (
-        <QuestionModal context={practiceContext} streak={0} onComplete={handlePracticeComplete} />
+        <QuestionModal context={practiceContext} streak={practiceStreak} onComplete={handlePracticeComplete} />
       )}
     </div>
   );

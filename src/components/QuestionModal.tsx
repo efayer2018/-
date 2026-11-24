@@ -17,21 +17,25 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({ context, streak, o
 
   const isAnswered = selectedIdx !== null;
   const isCorrect = selectedIdx === question.answerIndex;
+  const nextCombo = streak + 1;
+  const isCombo5 = isAnswered && isCorrect && nextCombo >= 5 && nextCombo % 5 === 0;
+  const isCombo3 = isAnswered && isCorrect && nextCombo === 3;
 
-  // Auto-trigger battle reward when answered correctly (no manual click needed!)
+  // Auto-trigger battle reward when answered correctly (allow slightly longer chime on 3/5 combo)
   useEffect(() => {
     if (!isAnswered || !isCorrect) return;
+    const delayMs = isCombo5 || isCombo3 ? 950 : 700;
     const timer = window.setTimeout(() => {
       onComplete(true);
-    }, 700);
+    }, delayMs);
     return () => window.clearTimeout(timer);
-  }, [isAnswered, isCorrect, onComplete]);
+  }, [isAnswered, isCorrect, isCombo3, isCombo5, onComplete]);
 
   const handleSelect = (idx: number) => {
     if (isAnswered) return;
     setSelectedIdx(idx);
     if (idx === question.answerIndex) {
-      soundEngine.playCorrect();
+      soundEngine.playCorrect(nextCombo);
     } else {
       soundEngine.playWrong();
     }
@@ -57,7 +61,7 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({ context, streak, o
       aria-modal="true"
       aria-labelledby="quiz-modal-title"
     >
-      <div className="w-full max-w-xl bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden">
+      <div className="w-full max-w-xl max-h-[90dvh] overflow-y-auto bg-white border border-slate-200 rounded-2xl shadow-2xl">
         <div className="px-6 py-4 bg-[#FAF8F5] border-b border-slate-200 flex items-center justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
@@ -74,10 +78,20 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({ context, streak, o
             </h2>
           </div>
 
-          {streak > 0 && (
+          {(streak > 0 || (isAnswered && isCorrect)) && (
             <div className="text-right shrink-0">
-              <div className="text-xs text-slate-500">当前连对</div>
-              <div className="text-base font-bold text-amber-600 font-mono-num">{streak} 题</div>
+              <div className="text-xs text-slate-500">Combo 连击</div>
+              <div
+                className={`text-base font-extrabold font-mono-num ${
+                  (isAnswered && isCorrect ? nextCombo : streak) >= 5
+                    ? 'text-red-600'
+                    : (isAnswered && isCorrect ? nextCombo : streak) >= 3
+                      ? 'text-amber-600'
+                      : 'text-emerald-700'
+                }`}
+              >
+                {isAnswered && isCorrect ? `${nextCombo} 连击` : `${streak} 连击`}
+              </div>
             </div>
           )}
         </div>
@@ -129,7 +143,7 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({ context, streak, o
                   type="button"
                   disabled={isAnswered}
                   onClick={() => handleSelect(idx)}
-                  className={`flex items-center justify-between gap-3 px-4 py-3.5 rounded-xl border text-left text-sm transition-colors min-h-[48px] cursor-pointer disabled:cursor-default ${btnStyle}`}
+                  className={`flex items-center justify-between gap-3 px-4 py-3.5 rounded-xl border text-left text-sm transition-all min-h-[52px] active:scale-[0.98] cursor-pointer disabled:cursor-default ${btnStyle}`}
                 >
                   <div className="flex items-center gap-3">
                     <span className="font-mono-num font-bold text-xs w-6 h-6 rounded-md bg-white border border-slate-200 flex items-center justify-center shrink-0">
@@ -150,21 +164,34 @@ export const QuestionModal: React.FC<QuestionModalProps> = ({ context, streak, o
             <div
               className={`p-4 rounded-xl border ${
                 isCorrect
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                  ? isCombo5
+                    ? 'bg-amber-50 border-amber-400 text-amber-950'
+                    : isCombo3
+                      ? 'bg-emerald-50 border-emerald-400 text-emerald-950'
+                      : 'bg-emerald-50 border-emerald-200 text-emerald-950'
                   : 'bg-red-50 border-red-200 text-red-950'
               }`}
             >
               <div className="flex items-center gap-2 font-bold text-sm mb-1.5">
                 {isCorrect ? (
                   <>
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
-                    <span>回答正确！正在自动触发战果：{rewardText}</span>
+                    <Sparkles className={`w-4 h-4 ${isCombo5 ? 'text-amber-600' : 'text-emerald-600'}`} />
+                    <span>
+                      {isCombo5
+                        ? `Combo x${nextCombo} 五连超神！触发超级战果：${rewardText}`
+                        : isCombo3
+                          ? `Combo x3 三连节奏达成！触发连击战果：${rewardText}`
+                          : nextCombo >= 2
+                            ? `Combo x${nextCombo} 连击！正在自动触发战果：${rewardText}`
+                            : `回答正确！正在自动触发战果：${rewardText}`}
+                    </span>
                   </>
                 ) : (
                   <>
                     <HelpCircle className="w-4 h-4 text-red-600" />
                     <span>
-                      差一点点！正确答案是 {['A', 'B', 'C', 'D'][question.answerIndex]}，已自动收录进「错题本」
+                      {streak >= 2 ? `Combo x${streak} 中断，别灰心！` : '差一点点！'}正确答案是{' '}
+                      {['A', 'B', 'C', 'D'][question.answerIndex]}，已自动收录进「错题本」
                     </span>
                   </>
                 )}

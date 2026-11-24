@@ -167,10 +167,41 @@ class SoundEngine {
     this.tone(75, 0.35, 'triangle', 0.11, 0.05);
   }
 
-  playCorrect() {
-    this.tone(523.25, 0.12, 'triangle', 0.09, 0);
-    this.tone(659.25, 0.12, 'triangle', 0.09, 0.08);
-    this.tone(783.99, 0.22, 'triangle', 0.1, 0.16);
+  playCorrect(combo = 1) {
+    if (combo >= 5 && combo % 5 === 0) {
+      this.playCombo5();
+      return;
+    }
+    if (combo === 3) {
+      this.playCombo3();
+      return;
+    }
+    // Slight pitch lift on ongoing combos for rhythmic momentum
+    const shift = combo >= 2 ? Math.min(1.18, 1 + (combo - 1) * 0.03) : 1;
+    this.tone(523.25 * shift, 0.12, 'triangle', 0.09, 0);
+    this.tone(659.25 * shift, 0.12, 'triangle', 0.09, 0.08);
+    this.tone(783.99 * shift, 0.22, 'triangle', 0.1, 0.16);
+  }
+
+  // Distinct energetic 4-note rising arpeggio for 3-Combo milestone
+  playCombo3() {
+    this.tone(523.25, 0.11, 'triangle', 0.1, 0);     // C5
+    this.tone(659.25, 0.11, 'triangle', 0.1, 0.075); // E5
+    this.tone(783.99, 0.12, 'triangle', 0.11, 0.15); // G5
+    this.tone(1046.5, 0.28, 'sine', 0.12, 0.225);    // C6
+    this.tone(523.25, 0.26, 'sine', 0.06, 0.225);    // warm root sustain
+  }
+
+  // Grand fanfare cascade + sparkle shimmer for 5-Combo (and multiples of 5)
+  playCombo5() {
+    this.tone(523.25, 0.1, 'triangle', 0.1, 0);      // C5
+    this.tone(659.25, 0.1, 'triangle', 0.1, 0.065);  // E5
+    this.tone(783.99, 0.1, 'triangle', 0.11, 0.13);  // G5
+    this.tone(987.77, 0.12, 'triangle', 0.11, 0.195); // B5
+    this.tone(1046.5, 0.34, 'triangle', 0.12, 0.26); // C6
+    this.tone(1318.51, 0.34, 'sine', 0.09, 0.28);    // E6
+    this.tone(1567.98, 0.36, 'sine', 0.08, 0.31);    // G6 sparkle
+    this.tone(261.63, 0.38, 'sine', 0.07, 0.26);     // C4 bass anchor
   }
 
   playWrong() {
