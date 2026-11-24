@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: "Plus Jakarta Sans", "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .font-mono-num {
+    font-family: "JetBrains Mono", "Plus Jakarta Sans", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes bobGentle {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.02);
+  }
+}
+
+@keyframes zombieWalk {
+  0%, 100% {
+    transform: translateY(0px) rotate(-1.5deg);
+  }
+  50% {
+    transform: translateY(-2px) rotate(1.5deg);
+  }
+}
+
+@keyframes sunFloat {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-5px) scale(1.05);
+  }
+}
+
+@keyframes hitPulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.75;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-bob-gentle {
+  animation: bobGentle 2.4s ease-in-out infinite;
+}
+
+.animate-zombie-walk {
+  animation: zombieWalk 0.9s ease-in-out infinite;
+}
+
+.animate-sun-float {
+  animation: sunFloat 2s ease-in-out infinite;
+}
+
+.animate-hit-pulse {
+  animation: hitPulse 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bob-gentle,
+  .animate-zombie-walk,
+  .animate-sun-float,
+  .animate-hit-pulse {
+    animation: none !important;
+  }
+}
